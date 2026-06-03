@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tic-Tac-Toe</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323:wght@400&display=swap');
+
+  :root {
+    --bg: #0a0a0f;
+    --panel: #12121a;
+    --border: #2a2a3e;
+    --x-color: #ff4d6d;
+    --o-color: #4dffb4;
+    --grid: #1e1e2e;
+    --glow-x: 0 0 20px #ff4d6d88;
+    --glow-o: 0 0 20px #4dffb488;
+    --text: #e0e0ff;
+    --dim: #555577;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Press Start 2P', monospace;
+    color: var(--text);
+    overflow: hidden;
+  }
+
+  /* Scanline overlay */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,0.15) 2px,
+      rgba(0,0,0,0.15) 4px
+    );
+    pointer-events: none;
+    z-index: 100;
+  }
+
+  /* Stars */
+  body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      radial-gradient(1px 1px at 10% 20%, #ffffff33, transparent),
+      radial-gradient(1px 1px at 40% 70%, #ffffff22, transparent),
+      radial-gradient(1px 1px at 70% 30%, #ffffff44, transparent),
+      radial-gradient(1px 1px at 85% 60%, #ffffff22, transparent),
+      radial-gradient(1px 1px at 25% 85%, #ffffff33, transparent),
+      radial-gradient(1px 1px at 60% 15%, #ffffff22, transparent),
+      radial-gradient(2px 2px at 90% 80%, #ffffff22, transparent),
+      radial-gradient(1px 1px at 5% 50%, #ffffff33, transparent);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .container {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 20px;
+    padding: 20px;
+  }
+
+  h1 {
+    font-size: clamp(12px, 2.5vw, 18px);
+    letter-spacing: 4px;
+    text-align: center;
+    color: var(--text);
+    text-shadow: 0 0 30px #7b7bff88;
+    animation: flicker 4s infinite;
+  }
+
+  @keyframes flicker {
+    0%, 95%, 100% { opacity: 1; }
+    96% { opacity: 0.7; }
+    97% { opacity: 1; }
+    98% { opacity: 0.5; }
+  }
+
+  /* Status bar */
+  .status-bar {
+    display: flex;
+    gap: 30px;
+    align-items: center;
+    font-family: 'VT323', monospace;
+    font-size: 22px;
+    color: var(--dim);
+  }
+
+  .player-badge {
+    padding: 6px 14px;
+    border: 2px solid currentColor;
+    transition: all 0.3s;
+    letter-spacing: 2px;
+  }
+
+  .player-badge.x { color: var(--x-color); }
+  .player-badge.o { color: var(--o-color); }
+  .player-badge.active.x { box-shadow: var(--glow-x); background: #ff4d6d18; }
+  .player-badge.active.o { box-shadow: var(--glow-o); background: #4dffb418; }
+
+  /* Main message */
+  #message {
+    font-family: 'VT323', monospace;
+    font-size: clamp(16px, 3vw, 26px);
+    text-align: center;
+    min-height: 36px;
+    letter-spacing: 2px;
+    transition: color 0.3s;
+  }
+
+  /* Board */
+  .board-wrap {
+    position: relative;
+  }
+
+  .board {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0;
+    border: 2px solid var(--border);
+    box-shadow: 0 0 40px #7b7bff22, inset 0 0 40px #0005;
+    background: var(--grid);
+  }
+
+  .cell {
+    width: clamp(90px, 20vw, 130px);
+    height: clamp(90px, 20vw, 130px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Press Start 2P', monospace;
+    font-size: clamp(32px, 8vw, 54px);
+    cursor: pointer;
+    border: 1px solid var(--border);
+    background: transparent;
+    transition: background 0.15s;
+    position: relative;
+    user-select: none;
+  }
+
+  .cell:hover:not(.taken):not(.disabled) {
+    background: #ffffff08;
+  }
+
+  .cell.taken { cursor: default; }
+  .cell.disabled { cursor: not-allowed; }
+
+  .cell .mark {
+    opacity: 0;
+    transform: scale(0.3) rotate(-15deg);
+    transition: opacity 0.2s, transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+    display: block;
+  }
+
+  .cell.placed .mark {
+    opacity: 1;
+    transform: scale(1) rotate(0deg);
+  }
+
+  .cell .mark.x { color: var(--x-color); text-shadow: var(--glow-x); }
+  .cell .mark.o { color: var(--o-color); text-shadow: var(--glow-o); }
+
+  .cell.winning {
+    animation: win-pulse 0.6s ease forwards;
+  }
+
+  @keyframes win-pulse {
+    0% { background: transparent; }
+    50% { background: #ffffff18; }
+    100% { background: #ffffff0c; }
+  }
+
+  /* Score */
+  .scores {
+    display: flex;
+    gap: 40px;
+    font-family: 'VT323', monospace;
+    font-size: 20px;
+  }
+
+  .score-item { text-align: center; color: var(--dim); }
+  .score-item span { display: block; font-size: 32px; margin-top: 4px; }
+  .score-item.x span { color: var(--x-color); text-shadow: var(--glow-x); }
+  .score-item.o span { color: var(--o-color); text-shadow: var(--glow-o); }
+  .score-item.d span { color: #aaa; }
+
+  /* Buttons */
+  .btn {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 10px;
+    padding: 12px 24px;
+    background: transparent;
+    border: 2px solid var(--border);
+    color: var(--text);
+    cursor: pointer;
+    letter-spacing: 2px;
+    transition: all 0.2s;
+    text-transform: uppercase;
+  }
+
+  .btn:hover {
+    border-color: #7b7bff;
+    color: #7b7bff;
+    box-shadow: 0 0 16px #7b7bff44;
+  }
+
+  /* Connection indicator */
+  .conn {
+    font-family: 'VT323', monospace;
+    font-size: 16px;
+    color: var(--dim);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: #555;
+    display: inline-block;
+    transition: background 0.3s, box-shadow 0.3s;
+  }
+
+  .dot.on { background: #4dffb4; box-shadow: 0 0 8px #4dffb4; }
+  .dot.wait { background: #ffcc00; box-shadow: 0 0 8px #ffcc00; animation: blink 1s infinite; }
+
+  @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+  /* Your symbol tag */
+  .you-tag {
+    font-family: 'VT323', monospace;
+    font-size: 18px;
+    padding: 4px 10px;
+    border: 1px solid;
+    letter-spacing: 1px;
+  }
+  .you-tag.x { color: var(--x-color); border-color: var(--x-color); }
+  .you-tag.o { color: var(--o-color); border-color: var(--o-color); }
+  .you-tag.s { color: var(--dim); border-color: var(--dim); }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>TIC ✦ TAC ✦ TOE</h1>
+
+  <div style="display:flex;gap:16px;align-items:center;">
+    <div class="conn"><span class="dot" id="dot"></span><span id="conn-text">CONNECTING...</span></div>
+    <div class="you-tag s" id="you-tag">—</div>
+  </div>
+
+  <div class="status-bar">
+    <div class="player-badge x" id="badge-x">X</div>
+    <div style="color:#444;font-family:'VT323',monospace;font-size:26px;">VS</div>
+    <div class="player-badge o" id="badge-o">O</div>
+  </div>
+
+  <div id="message">WAITING FOR PLAYERS...</div>
+
+  <div class="board-wrap">
+    <div class="board" id="board">
+      <!-- 9 cells injected by JS -->
+    </div>
+  </div>
+
+  <div class="scores">
+    <div class="score-item x">X WINS<span id="score-x">0</span></div>
+    <div class="score-item d">DRAWS<span id="score-d">0</span></div>
+    <div class="score-item o">O WINS<span id="score-o">0</span></div>
+  </div>
+
+  <button class="btn" onclick="resetGame()">↺ NEW GAME</button>
+</div>
+
+<script>
+const socket = io();
+
+let mySymbol = null;
+let board = Array(9).fill('');
+let currentTurn = 'X';
+let winner = null;
+let scores = { X: 0, O: 0, draw: 0 };
+
+// Build board cells
+const boardEl = document.getElementById('board');
+for (let i = 0; i < 9; i++) {
+  const cell = document.createElement('div');
+  cell.className = 'cell';
+  cell.dataset.index = i;
+  cell.innerHTML = `<span class="mark"></span>`;
+  cell.addEventListener('click', () => makeMove(i));
+  boardEl.appendChild(cell);
+}
+
+function getCells() { return boardEl.querySelectorAll('.cell'); }
+
+function renderBoard(boardData, winCells = [], lastMove = -1) {
+  getCells().forEach((cell, i) => {
+    const val = boardData[i];
+    const mark = cell.querySelector('.mark');
+    mark.textContent = val;
+    mark.className = 'mark ' + (val || '').toLowerCase();
+
+    cell.className = 'cell';
+    if (val) { cell.classList.add('taken'); cell.classList.add('placed'); }
+    if (winCells.includes(i)) cell.classList.add('winning');
+    if (!val && !winner && mySymbol === currentTurn) { /* clickable */ }
+    else if (!val) cell.classList.add('disabled');
+  });
+}
+
+function updateTurnBadges() {
+  const bx = document.getElementById('badge-x');
+  const bo = document.getElementById('badge-o');
+  bx.className = 'player-badge x' + (currentTurn === 'X' && !winner ? ' active' : '');
+  bo.className = 'player-badge o' + (currentTurn === 'O' && !winner ? ' active' : '');
+}
+
+function setMessage(msg, color) {
+  const el = document.getElementById('message');
+  el.textContent = msg;
+  el.style.color = color || '';
+}
+
+socket.on('connect', () => {
+  document.getElementById('dot').className = 'dot wait';
+  document.getElementById('conn-text').textContent = 'CONNECTED';
+});
+
+socket.on('disconnect', () => {
+  document.getElementById('dot').className = 'dot';
+  document.getElementById('conn-text').textContent = 'DISCONNECTED';
+  setMessage('CONNECTION LOST', '#ff4d6d');
+});
+
+socket.on('assigned', (data) => {
+  mySymbol = data.symbol;
+  board = data.board;
+  currentTurn = data.current_turn;
+  winner = data.winner;
+
+  const youTag = document.getElementById('you-tag');
+  if (mySymbol === 'X') { youTag.textContent = 'YOU = X'; youTag.className = 'you-tag x'; }
+  else if (mySymbol === 'O') { youTag.textContent = 'YOU = O'; youTag.className = 'you-tag o'; }
+  else { youTag.textContent = 'SPECTATOR'; youTag.className = 'you-tag s'; }
+
+  const count = data.players_connected;
+  updateConnectionStatus(count);
+  renderBoard(board);
+  updateTurnBadges();
+});
+
+socket.on('player_joined', (data) => {
+  updateConnectionStatus(data.players_connected);
+});
+
+socket.on('player_left', (data) => {
+  updateConnectionStatus(data.players_connected);
+  if (data.players_connected < 2) {
+    setMessage('OPPONENT DISCONNECTED', '#ff4d6d');
+  }
+});
+
+socket.on('game_update', (data) => {
+  board = data.board;
+  currentTurn = data.current_turn;
+  winner = data.winner;
+
+  renderBoard(board, data.winning_cells || [], data.last_move);
+  updateTurnBadges();
+
+  if (winner === 'draw') {
+    scores.draw++;
+    document.getElementById('score-d').textContent = scores.draw;
+    setMessage('DRAW — WELL PLAYED!', '#aaaaff');
+  } else if (winner) {
+    if (winner === 'X') scores.X++;
+    else scores.O++;
+    document.getElementById('score-x').textContent = scores.X;
+    document.getElementById('score-o').textContent = scores.O;
+
+    const col = winner === 'X' ? '#ff4d6d' : '#4dffb4';
+    if (winner === mySymbol) setMessage(`YOU WIN! ★`, col);
+    else if (mySymbol === 'spectator') setMessage(`PLAYER ${winner} WINS!`, col);
+    else setMessage(`${winner} WINS!`, col);
+  } else {
+    // Game reset
+    if (!data.winner && data.last_move === -1) {
+      setMessage(currentTurn === mySymbol ? 'YOUR TURN' : `PLAYER ${currentTurn}'S TURN`,
+        currentTurn === 'X' ? '#ff4d6d' : '#4dffb4');
+      return;
+    }
+    const isMyTurn = currentTurn === mySymbol;
+    setMessage(isMyTurn ? 'YOUR TURN' : `PLAYER ${currentTurn}'S TURN`,
+      currentTurn === 'X' ? '#ff4d6d' : '#4dffb4');
+  }
+});
+
+function updateConnectionStatus(count) {
+  const dot = document.getElementById('dot');
+  const text = document.getElementById('conn-text');
+  if (count >= 2) {
+    dot.className = 'dot on';
+    text.textContent = '2 PLAYERS';
+    if (!winner) {
+      const isMyTurn = currentTurn === mySymbol;
+      setMessage(isMyTurn ? 'YOUR TURN' : `PLAYER ${currentTurn}'S TURN`,
+        currentTurn === 'X' ? '#ff4d6d' : '#4dffb4');
+    }
+  } else {
+    dot.className = 'dot wait';
+    text.textContent = `${count}/2 PLAYERS`;
+    setMessage('WAITING FOR OPPONENT...', '#ffcc00');
+  }
+}
+
+function makeMove(index) {
+  if (!mySymbol || mySymbol === 'spectator') return;
+  if (winner) return;
+  if (board[index]) return;
+  if (currentTurn !== mySymbol) return;
+  socket.emit('make_move', { index });
+}
+
+function resetGame() {
+  socket.emit('reset_game');
+}
+</script>
+</body>
+</html>

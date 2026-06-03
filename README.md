@@ -43,7 +43,7 @@ Play against a friend on the **same Wi-Fi/LAN network** directly from your brows
 Clone the repository:
 
 ```bash
-git clone <your-repository-url>
+git clone https://github.com/parvinder204/tictactoe.git
 cd tic-tac-toe
 ```
 
@@ -148,7 +148,3 @@ If a player disconnects:
 - Multiple game rooms
 
 ---
-
-## 📜 License
-
-This project is open-source and available under the MIT License.
